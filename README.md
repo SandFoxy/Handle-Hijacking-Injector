@@ -14,9 +14,9 @@ This is fork from Simple Manual Map Injector By TheCruZ
 
 Because it using handle hijacking and undetected by most of usermode anti-cheats
 
-* SL-AC - Undetected
-* VAC - Untested
-* Others - Untested
+* 🟢 SL-AC - Undetected
+* 🟠 VAC - Untested
+* 🟠 Others - Untested
 
 ## Usage
 * Drag & Drop DLL on injector
