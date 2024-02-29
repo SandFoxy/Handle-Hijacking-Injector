@@ -19,7 +19,7 @@ Because it using handle hijacking and undetected by most of usermode anti-cheats
 * 🟠 Others - Untested
 
 ## Usage
-* Drag & Drop DLL on injector
+* Drag & Drop DLL on injector .exe (DLL And Proccess Need To Be Same Arhetecture)
 * Enter proccess name
 * Done!
 
