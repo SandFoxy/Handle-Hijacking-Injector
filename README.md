@@ -1,7 +1,7 @@
 <br/>
 <p align="center">
   <a href="https://github.com/SandFoxy/Handle-Hijacking-Injector">
-    <img src="logo.png" alt="HydroGen" width="240" height="240">
+    <img src="logo.png" alt="HydroGen" width="128" height="128">
   </a>
   <br>
   <br>
