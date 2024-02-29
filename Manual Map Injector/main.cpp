@@ -1,11 +1,39 @@
+#define _HAS_STD_BYTE  0
 #include "injector.h"
+#include "hijacking.h"
 
-
-#include <stdio.h>
 #include <string>
 #include <iostream>
 
 using namespace std;
+
+OBJECT_ATTRIBUTES InitObjectAttributes(PUNICODE_STRING name, ULONG attributes, HANDLE hRoot, PSECURITY_DESCRIPTOR security)
+{
+	OBJECT_ATTRIBUTES object;
+
+	object.Length = sizeof(OBJECT_ATTRIBUTES);
+	object.ObjectName = name;
+	object.Attributes = attributes;
+	object.RootDirectory = hRoot;
+	object.SecurityDescriptor = security;
+
+	return object;
+}
+
+SYSTEM_HANDLE_INFORMATION* hInfo; //holds the handle information
+
+//the handles we will need to use later on
+HANDLE procHandle = NULL;
+HANDLE hProcess = NULL;
+HANDLE HijackedHandle = NULL;
+
+bool IsHandleValid(HANDLE handle) //litle bit optimized
+{
+	if (handle && handle != INVALID_HANDLE_VALUE)
+		return true;
+
+	return false;
+}
 
 bool IsCorrectTargetArchitecture(HANDLE hProc) {
 	BOOL bTarget = FALSE;
@@ -39,10 +67,127 @@ DWORD GetProcessIdByName(wchar_t* name) {
 	return 0;
 }
 
-int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
+#define LOG(text) std::cout << text << std::endl;
 
+HANDLE HijackExistingHandle(DWORD dwTargetProcessId)
+{
+	HMODULE Ntdll = GetModuleHandleA("ntdll");
+
+	_RtlAdjustPrivilege RtlAdjustPrivilege = (_RtlAdjustPrivilege)GetProcAddress(Ntdll, "RtlAdjustPrivilege");
+
+	boolean OldPriv;
+
+	RtlAdjustPrivilege(SeDebugPriv, TRUE, FALSE, &OldPriv);
+
+	_NtQuerySystemInformation NtQuerySystemInformation = (_NtQuerySystemInformation)GetProcAddress(Ntdll, "NtQuerySystemInformation");
+
+	_NtDuplicateObject NtDuplicateObject = (_NtDuplicateObject)GetProcAddress(Ntdll, "NtDuplicateObject");
+	_NtOpenProcess NtOpenProcess = (_NtOpenProcess)GetProcAddress(Ntdll, "NtOpenProcess");
+	OBJECT_ATTRIBUTES Obj_Attribute = InitObjectAttributes(NULL, NULL, NULL, NULL);
+
+	CLIENT_ID clientID = { 0 };
+
+	DWORD size = sizeof(SYSTEM_HANDLE_INFORMATION);
+
+	hInfo = (SYSTEM_HANDLE_INFORMATION*) new byte[size];
+
+	ZeroMemory(hInfo, size);
+
+	NTSTATUS NtRet = NULL;
+
+	do
+	{
+		delete[] hInfo;
+
+		size *= 1.5;
+		try
+		{
+			hInfo = (PSYSTEM_HANDLE_INFORMATION) new byte[size];
+		}
+		catch (std::bad_alloc)
+		{
+
+			LOG("Bad Heap Allocation");
+			Sleep(5000);
+			exit(0);
+
+		}
+		Sleep(1);
+
+	} while ((NtRet = NtQuerySystemInformation(SystemHandleInformation, hInfo, size, NULL)) == STATUS_INFO_LENGTH_MISMATCH);
+
+	if (!NT_SUCCESS(NtRet))
+	{
+		LOG("NtQuerySystemInformation Failed");
+		Sleep(5000);
+		exit(0);
+	}
+
+	for (unsigned int i = 0; i < hInfo->HandleCount; ++i)
+	{
+		static DWORD NumOfOpenHandles;
+
+		GetProcessHandleCount(GetCurrentProcess(), &NumOfOpenHandles);
+
+		if (NumOfOpenHandles > 50)
+		{
+			LOG("Error Handle Leakage Detected");
+			Sleep(5000);
+			exit(0);
+		}
+
+
+		if (!IsHandleValid((HANDLE)hInfo->Handles[i].Handle) || hInfo->Handles[i].ObjectTypeNumber != ProcessHandleType)
+			continue;
+
+		clientID.UniqueProcess = (DWORD*)hInfo->Handles[i].ProcessId;
+
+		procHandle ? CloseHandle(procHandle) : 0;
+
+		NtRet = NtOpenProcess(&procHandle, PROCESS_DUP_HANDLE, &Obj_Attribute, &clientID);
+		if (!IsHandleValid(procHandle) || !NT_SUCCESS(NtRet))
+		{
+			continue;
+		}
+
+		NtRet = NtDuplicateObject(procHandle, (HANDLE)hInfo->Handles[i].Handle, NtCurrentProcess, &HijackedHandle, PROCESS_ALL_ACCESS, 0, 0);
+		if (!IsHandleValid(HijackedHandle) || !NT_SUCCESS(NtRet))
+		{
+
+			continue;
+		}
+
+		if (GetProcessId(HijackedHandle) != dwTargetProcessId) {
+			CloseHandle(HijackedHandle);
+			continue;
+		}
+		hProcess = HijackedHandle;
+		break;
+	}
+	return hProcess;
+
+}
+
+int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
 	wchar_t* dllPath;
 	DWORD PID;
+
+	LOG((R"(
+ /$$   /$$                 /$$                      /$$$$$$                     
+| $$  | $$                | $$                     /$$__  $$                    
+| $$  | $$ /$$   /$$  /$$$$$$$  /$$$$$$   /$$$$$$ | $$  \__/  /$$$$$$  /$$$$$$$ 
+| $$$$$$$$| $$  | $$ /$$__  $$ /$$__  $$ /$$__  $$| $$ /$$$$ /$$__  $$| $$__  $$
+| $$__  $$| $$  | $$| $$  | $$| $$  \__/| $$  \ $$| $$|_  $$| $$$$$$$$| $$  \ $$
+| $$  | $$| $$  | $$| $$  | $$| $$      | $$  | $$| $$  \ $$| $$_____/| $$  | $$
+| $$  | $$|  $$$$$$$|  $$$$$$$| $$      |  $$$$$$/|  $$$$$$/|  $$$$$$$| $$  | $$
+|__/  |__/ \____  $$ \_______/|__/       \______/  \______/  \_______/|__/  |__/
+           /$$  | $$                                                            
+          |  $$$$$$/                                                            
+           \______/                                                              
+)"));
+	LOG("\n\nManual Map Injector Using Handle Hijack");
+	//LOG(xo
+
 	if (argc == 3) {
 		dllPath = argv[1];
 		PID = GetProcessIdByName(argv[2]);
@@ -50,7 +195,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
 	else if (argc == 2) {
 		dllPath = argv[1];
 		std::string pname;
-		printf("Process Name:\n");
+		printf("Process Name: ");
 		std::getline(std::cin, pname);
 
 		char* vIn = (char*)pname.c_str();
@@ -73,19 +218,7 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
 
 	printf("Process pid: %d\n", PID);
 
-	TOKEN_PRIVILEGES priv = { 0 };
-	HANDLE hToken = NULL;
-	if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
-		priv.PrivilegeCount = 1;
-		priv.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-
-		if (LookupPrivilegeValue(NULL, SE_DEBUG_NAME, &priv.Privileges[0].Luid))
-			AdjustTokenPrivileges(hToken, FALSE, &priv, 0, NULL, NULL);
-
-		CloseHandle(hToken);
-	}
-
-	HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, PID);
+	HANDLE hProc = HijackExistingHandle(PID);
 	if (!hProc) {
 		DWORD Err = GetLastError();
 		printf("OpenProcess failed: 0x%X\n", Err);
