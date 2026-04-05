@@ -7,6 +7,8 @@
 
 using namespace std;
 
+typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+
 OBJECT_ATTRIBUTES InitObjectAttributes(PUNICODE_STRING name, ULONG attributes, HANDLE hRoot, PSECURITY_DESCRIPTOR security)
 {
 	OBJECT_ATTRIBUTES object;
@@ -65,6 +67,23 @@ DWORD GetProcessIdByName(wchar_t* name) {
 
 	CloseHandle(snapshot);
 	return 0;
+}
+
+bool IsWindows24H2OrHigher() {
+    HMODULE hMod = GetModuleHandleW(L"ntdll.dll");
+    if (hMod) {
+        auto rtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hMod, "RtlGetVersion");
+        if (rtlGetVersion) {
+            RTL_OSVERSIONINFOW osvi = { 0 };
+            osvi.dwOSVersionInfoSize = sizeof(osvi);
+
+            if (rtlGetVersion(&osvi) == 0) {
+                if (osvi.dwMajorVersion > 10) return true;
+                if (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 26100) return true;
+            }
+        }
+    }
+    return false;
 }
 
 #define LOG(text) std::cout << text << std::endl;
@@ -187,7 +206,12 @@ int wmain(int argc, wchar_t* argv[], wchar_t* envp[]) {
 )"));
 	LOG("\n\nManual Map Injector Using Handle Hijack");
 	//LOG(xo
-
+	if (IsWindows24H2OrHigher()){
+		LOG("Handle Hijacking was fixed in your version of Windows.");
+		system("pause");
+		return 0;
+	}
+	
 	if (argc == 3) {
 		dllPath = argv[1];
 		PID = GetProcessIdByName(argv[2]);
